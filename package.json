@@ -7,7 +7,9 @@
     "dev:css": "tailwindcss -i ./app/input.css -o ./app/globals.css -w",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "build:prod": "APP_ENV=prod next build",
+    "deploy:prod": "next build && pm2 startOrRestart ecosystem.config.js --env production"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.1.2",
@@ -45,6 +47,7 @@
     "lodash": "^4.17.21",
     "lucide-react": "^0.256.0",
     "next": "13.4.7",
+    "pm2": "^5.3.0",
     "postcss": "8.4.24",
     "radash": "^11.0.0",
     "react": "18.2.0",

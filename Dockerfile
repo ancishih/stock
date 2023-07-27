@@ -1,49 +1,53 @@
+#syntax=docker/dockerfile:1.4
+FROM node:18-alpine AS base
 
-FROM node:18-alpine AS deps
-# RUN apk add --no-cache libc6-compat
+# 1. Install dependencies only when needed
+FROM base AS deps
+# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
+RUN apk add --no-cache libc6-compat
+
 WORKDIR /app
 
-COPY package.json package-lock.json ecosystem.config.js ./
-RUN npm install --production
-CMD ["ls -a"]
+# Install dependencies based on the preferred package manager
+COPY --link ecosystem.config.js next.config.js package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
+RUN \
+  if [ -f yarn.lock ]; then yarn --frozen-lockfile; \
+  elif [ -f package-lock.json ]; then npm ci; \
+  elif [ -f pnpm-lock.yaml ]; then yarn global add pnpm && pnpm i; \
+  else echo "Lockfile not found." && exit 1; \
+  fi
 
-FROM node:18-alpine AS Builder
+
+# 2. Rebuild the source code only when needed
+FROM base AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-
-ENV NEXT_TELEMETRY_DISABLED 1
-
-RUN npm run build
-
-FROM node:18-alpine AS runner
+COPY --from=deps --link /app/node_modules ./node_modules
+COPY --link . .
+# This will do the trick, use the corresponding env file for each environment.
+# COPY --link .env.production.sample .env.production
+RUN yarn build
+# 3. Production image, copy all the files and run next
+FROM base AS runner
 WORKDIR /app
 RUN npm install --global pm2
+ENV NODE_ENV=production
 
-# FROM node:alpine
-# WORKDIR /usr/app
-# RUN npm install --global pm2
-# COPY ./package*.json ./
-# RUN npm install --production
-# COPY ./ ./
-# RUN npm run build
-# EXPOSE 3000
-# USER node
-ENV NODE_ENV production
+RUN \
+  addgroup -g 1001 -S nodejs; \
+  adduser -S nextjs -u 1001
 
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nextjs -u 1001
+COPY --from=builder --link /app/public ./public
 
-COPY --from=builder /app/next.config.js ./
-COPY --from=builder /app/public ./public
-COPY --from=deps /app/package.json ./package.json
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/ecosystem.config.js ./
-EXPOSE 3000 
+# # Automatically leverage output traces to reduce image size
+# # https://nextjs.org/docs/advanced-features/output-file-tracing
+COPY --from=builder --link --chown=1001:1001 /app/.next/standalone ./
+COPY --from=builder --link --chown=1001:1001 /app/.next/static ./.next/static
+COPY --from=builder --link --chown=1001:1001 /app/ecosystem.config.js ./
+# USER nextjs
+
+EXPOSE 3000
 
 ENV PORT 3000
+ENV HOSTNAME localhost
 CMD ["pm2-runtime", "ecosystem.config.js"]
-# CMD ["pm2-runtime", "start", "npm", "--", "start"]
 
-# CMD ["npm","start"]
